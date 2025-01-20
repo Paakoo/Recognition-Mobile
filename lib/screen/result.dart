@@ -1,20 +1,54 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart'; // Tambahkan ini
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class ResultScreen extends StatelessWidget {
   final Map<String, dynamic> result;
   final Uint8List imageBytes;
+  final storage = FlutterSecureStorage();
 
-  const ResultScreen({
+  ResultScreen({
     Key? key,
     required this.result,
     required this.imageBytes,
   }) : super(key: key);
 
+  Future<void> _sendPresenceData(BuildContext context) async {
+    try {
+      final token = await storage.read(key: 'jwt_token');
+      final response = await http.post(
+        Uri.parse('http://172.20.10.4:5000/api/presence'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode(result),
+      );
+
+      if (response.statusCode == 201) {
+        Navigator.pushReplacementNamed(context, '/cob');
+      } else {
+        throw Exception('Failed to save presence data');
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    print(result);
     final bool isSuccess = result['status'] == 'success';
+    
+    if (isSuccess) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _sendPresenceData(context);
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -64,17 +98,14 @@ class ResultScreen extends StatelessWidget {
                       ),
                       SizedBox(height: 10),
                       Text(
-                        'Verified: ${result['data']['verified'] ?? 'Unknown'}',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: isSuccess ? Colors.green : Colors.red,
-                            ),
-                      ),
-                      SizedBox(height: 10),
-                      Text(
                         'Account Name: ${result['data']['database_name'] ?? 'Unknown'}',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       SizedBox(height: 10),
+                      Text(
+                        'Location: ${result['location'] ?? 'Unknown'}',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                       Text(
                         'Confidence: ${(result['data']['confidence'] * 100).toStringAsFixed(2)}%',
                         style: Theme.of(context).textTheme.bodyLarge,
@@ -105,6 +136,7 @@ class ResultScreen extends StatelessWidget {
                       _buildTimingRow('Total Time', result['timing']['total'],
                           style: TextStyle(fontWeight: FontWeight.bold)),
                     ],
+                    
                   ],
                 ),
               ),

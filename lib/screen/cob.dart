@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:location/location.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:jwt_decoder/jwt_decoder.dart';
@@ -16,10 +17,27 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  // Replace single manual location with list
+  final List<Map<String, dynamic>> _manualLocations = [
+    {
+      'name': 'Office Pertama',
+      'location': LatLng(-7.770163593429085, 111.48197507858067),
+    },
+    {
+      'name': 'PENS',
+      
+      'location': LatLng(-7.276631610635575, 112.79309730132333),
+    },
+    {
+      'name': 'Office Kedua',
+      'location': LatLng(-7.289138908277864, 112.79867124433288),
+    },
+  ];
+  
+  int _selectedOfficeIndex = 0;
   String? selectedLocation;
   bool isLocationSelected = false;
   final Location _location = Location();
-  LatLng _manualLocation = LatLng(-7.770163593429085, 111.48197507858067);
   LatLng? _userLocation;
   double _radius = 50.0;
   bool _isUserWithinRadius = false;
@@ -27,6 +45,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _currentTime = '';
   String _userName = '';
   Timer? _timer;
+  bool _hasAttendanceToday = false; // Add this line
 
   @override
   void initState() {
@@ -34,7 +53,9 @@ class _HomeScreenState extends State<HomeScreen> {
     _checkLocationService();
     _loadUserName();
     _updateTime();
+    _checkPresenceStatus(); // Add this line
     _timer = Timer.periodic(Duration(seconds: 1), (timer) => _updateTime());
+    initializeDateFormatting('id_ID');
   }
 
   @override
@@ -94,15 +115,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _fetchLocation() async {
     final locationData = await _location.getLocation();
-    setState(() {
+    if(mounted){
+      setState(() {
       _userLocation = LatLng(locationData.latitude!, locationData.longitude!);
       _checkIfUserWithinRadius();
     });
+    }
   }
 
   void _checkIfUserWithinRadius() {
     if (_userLocation != null) {
-      final distance = Distance().as(LengthUnit.Meter, _manualLocation, _userLocation!);
+      final selectedOffice = _manualLocations[_selectedOfficeIndex]['location'];
+      final distance = Distance().as(
+        LengthUnit.Meter,
+        selectedOffice,
+        _userLocation!
+      );
       setState(() {
         _isUserWithinRadius = distance <= _radius;
       });
@@ -142,11 +170,39 @@ class _HomeScreenState extends State<HomeScreen> {
     await _checkLocationService();
   }
 
+  Future<void> _checkPresenceStatus() async {
+    final storage = FlutterSecureStorage();
+    try {
+      final token = await storage.read(key: 'jwt_token');
+      if (token != null) {
+        final response = await http.get(
+          Uri.parse('http://172.20.10.4:5000/api/presencecheck?nama=$_userName'),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        );
+
+        if (response.statusCode == 200) {
+          setState(() {
+            _hasAttendanceToday = true;
+          });
+        } else if (response.statusCode == 400) {
+          setState(() {
+            _hasAttendanceToday = false;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error checking presence status: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Attendance System', style: TextStyle(fontWeight: FontWeight.bold)),
+        automaticallyImplyLeading: false,
+        // title: Text('Attendance System', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.blue[500],
         elevation: 0,
         actions: [
@@ -201,7 +257,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            DateFormat('EEEE, dd MMM yyyy').format(DateTime.now()),
+                            DateFormat('EEEE, dd MMM yyyy','id_ID').format(DateTime.now()),
                             style: TextStyle(fontSize: 14),
                           ),
                           Text(
@@ -223,45 +279,51 @@ class _HomeScreenState extends State<HomeScreen> {
               Card(
                 elevation: 4,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(16.0),
+                  padding: EdgeInsets.all(16),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Work Location',
+                        'Pilih Work Mode',
                         style: TextStyle(
-                          fontSize: 20,
+                          fontSize: 18,
                           fontWeight: FontWeight.bold,
                           color: Colors.blue[700],
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      SizedBox(height: 8),
                       Row(
                         children: [
                           Expanded(
-                            child: _buildLocationOption(
-                              'WFO',
-                              Icons.business,
-                              selectedLocation == 'WFO',
-                            ),
+                            child: _buildLocationOption('WFO', Icons.business, selectedLocation == 'WFO'),
                           ),
                           Expanded(
-                            child: _buildLocationOption(
-                              'WFA',
-                              Icons.home,
-                              selectedLocation == 'WFA',
-                            ),
+                            child: _buildLocationOption('WFA', Icons.home, selectedLocation == 'WFA'),
                           ),
                         ],
                       ),
+                      if (selectedLocation == 'WFO') ...[
+                        SizedBox(height: 16),
+                        Text(
+                          'Select Office Location',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[700],
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        _buildOfficeSelector(),
+                      ],
                     ],
                   ),
                 ),
               ),
+
               const SizedBox(height: 16),
-              
               // Map Container
               Expanded(
                 child: ClipRRect(
@@ -311,10 +373,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         _userLocation?.longitude
                       );
                     }: null,
-                icon: Icon(Icons.face),
-                label: Text('Start Face Recognition'),
+                // icon: _hasAttendanceToday ? Icon(Icons.person) : Icon(Icons.person, color: Colors.white),
+                label: Text(_hasAttendanceToday ? 'Sudah Melakukan Absensi' : 'Mulai Absensi'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue[700],
+                  backgroundColor: _hasAttendanceToday ? Colors.grey : Colors.blue[700],
                   foregroundColor: Colors.white,
                   padding: EdgeInsets.symmetric(vertical: 16),
                   minimumSize: Size(double.infinity, 50),
@@ -384,15 +446,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String _getStatusMessage() {
-    if (!_isLocationServiceEnabled) return 'Please enable location services';
-    if (!isLocationSelected) return 'Please select work location';
+    if (!_isLocationServiceEnabled) return 'Tolong hidupkan location services';
+    if (!isLocationSelected) return 'Pilih work mode';
     if (selectedLocation == 'WFA') return 'WFA Mode';
     return _isUserWithinRadius
-        ? 'You are within office radius'
-        : 'You are outside office radius';
+        ? 'Kamu berada di dalam radius'
+        : 'Kamu berada di luar radius';
   }
 
   bool _canStartRecognition() {
+    if (_hasAttendanceToday) return false;
     if (!_isLocationServiceEnabled) return false;
     if (!isLocationSelected) return false;
     if (_userLocation == null) return false;
@@ -405,21 +468,33 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _sendLocationData(String locationType, double? latitude, double? longitude) async {
-    final storage = FlutterSecureStorage();
-    final token = await storage.read(key: 'jwt_token');
-    
-    final locationData = {
-      'location_data': {
-        'location_type': locationType,
-        'timestamp': DateTime.now().toString(),
-        'latitude': latitude ?? '',
-        'longitude': longitude ?? ''
-      }
-    };
+  final storage = FlutterSecureStorage();
+  final token = await storage.read(key: 'jwt_token');
+  
+  if (_userLocation == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Location not available'))
+    );
+    return;
+  }
 
-    
+  final String officeName = locationType == 'WFO' 
+      ? _manualLocations[_selectedOfficeIndex]['name']
+      : 'Work From Anywhere';
+
+  final locationData = {
+    'location_data': {
+      'location_type': locationType,
+      'office_name': officeName,
+      'timestamp': DateTime.now().toIso8601String(),
+      'latitude': _userLocation!.latitude.toString(),
+      'longitude': _userLocation!.longitude.toString()
+    }
+  };
+
+  try {
     final response = await http.post(
-      Uri.parse('http://10.252.132.94:5000/api/getlocation'),
+      Uri.parse('http://172.20.10.4:5000/api/getlocation'),
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
@@ -427,53 +502,75 @@ class _HomeScreenState extends State<HomeScreen> {
       body: json.encode(locationData),
     );
 
-    Navigator.pushNamed(context, '/liveness');
+    if (response.statusCode == 200) {
+      Navigator.pushNamed(context, '/liveness');
+    } else {
+      throw Exception('Failed to send location data');
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error: $e'))
+    );
   }
-  
+}
+
   Widget _buildMap() {
     if (selectedLocation == 'WFA') {
     return FlutterMap(
       options: MapOptions(
-        initialCenter: _userLocation ?? _manualLocation,
+        initialCenter: _userLocation ?? _manualLocations[_selectedOfficeIndex]['location'],
         initialZoom: 16.0,
         minZoom: 16.0,
         maxZoom: 16.0,
         interactionOptions: const InteractionOptions(
-          flags: InteractiveFlag.none,
-        ),
+          flags: InteractiveFlag.none),
       ),
       children: [
         TileLayer(
-          urlTemplate: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+          urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
           subdomains: ['a', 'b', 'c'],
         ),
-        if (_userLocation != null)
-          MarkerLayer(
-            markers: [
-              Marker(
-                point: _userLocation!,
-                child: Icon(
-                  Icons.person_pin_circle,
-                  color: Colors.green,
-                  size: 40,
+        Stack(
+          children: [
+            MarkerLayer(
+              markers: [
+                if (_userLocation != null)
+                  Marker(
+                    point: _userLocation!,
+                    child: Icon(Icons.person_pin_circle, color: Colors.blue),
+                  ),
+              ],
+            ),
+            Align(
+              alignment: Alignment.topRight, // Menempatkan ikon di pojok kanan atas
+              child: Container(
+                margin: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white, // Warna latar belakang
+                  shape: BoxShape.rectangle,
+                  borderRadius: BorderRadius.circular(16), // Bentuk lingkaran
+                ),
+                child: IconButton(
+                  icon: Icon(Icons.refresh, color: Colors.blue[700]),
+                  onPressed: _restartGPS,
+                  tooltip: 'Restart GPS',
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
+        ),
       ],
     );
   }
 
     return FlutterMap(
       options: MapOptions(
-        initialCenter: _userLocation ?? _manualLocation,
-        initialZoom: 16.0,
-        minZoom: 16.0,
-        maxZoom: 16.0,
+        initialCenter: _userLocation ??  _manualLocations[_selectedOfficeIndex]['location'],
+        initialZoom: 18.0,
+        minZoom: 18.0,
+        maxZoom: 18.0,
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.none),
-        keepAlive: true,
-        onTap: null,
       ),
       children: [
         TileLayer(
@@ -485,7 +582,7 @@ class _HomeScreenState extends State<HomeScreen> {
             CircleLayer(
               circles: [
                 CircleMarker(
-                  point: _manualLocation,
+                  point: _manualLocations[_selectedOfficeIndex]['location'],
                   radius: _radius,
                   color: Colors.blue.withOpacity(0.3),
                   borderColor: Colors.blue,
@@ -496,7 +593,7 @@ class _HomeScreenState extends State<HomeScreen> {
             MarkerLayer(
               markers: [
                 Marker(
-                  point: _manualLocation,
+                  point: _manualLocations[_selectedOfficeIndex]['location'],
                   child: Icon(Icons.location_on, color: Colors.red),
                 ),
                 if (_userLocation != null)
@@ -532,5 +629,54 @@ class _HomeScreenState extends State<HomeScreen> {
     final storage = FlutterSecureStorage();
     await storage.delete(key: 'jwt_token');
     Navigator.pushReplacementNamed(context, '/login');
+  }
+
+  Widget _buildOfficeSelector() {
+    return Container(
+      margin: EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<int>(
+          isExpanded: true,
+          value: _selectedOfficeIndex,
+          items: List.generate(_manualLocations.length, (index) {
+            return DropdownMenuItem(
+              value: index,
+              child: Row(
+                children: [
+                  Icon(Icons.location_on, color: Colors.blue[700]),
+                  SizedBox(width: 12),
+                  Text(
+                    _manualLocations[index]['name'],
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+          onChanged: (index) {
+            if (index != null) {
+              setState(() {
+                _selectedOfficeIndex = index;
+                _checkIfUserWithinRadius();
+              });
+            }
+          },
+        ),
+      ),
+    );
   }
 }
